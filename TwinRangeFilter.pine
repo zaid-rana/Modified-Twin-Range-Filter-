@@ -1,0 +1,145 @@
+//@version=4
+study(title="Modified Twin Range Filter", shorttitle="MTwinRF v4.8", overlay=true)
+
+// Input for System Mode
+sysMode = input(defval="Positional", title="System Mode", options=["Positional", "Intraday"])
+
+// Inputs for Intraday Start and End Sessions
+intradayStart = input(defval=timestamp("2022-01-01 09:00"), title="Intraday Start Session", type=input.time)
+intradayEnd = input(defval=timestamp("2022-01-01 22:00"), title="Intraday End Session", type=input.time)
+
+// Inputs for Breakout Period
+breakoutPeriod = input(defval=3, title="Breakout Period", minval=1)
+exitBreakout = input(defval=3, title="Exit Breakout", minval=1)
+
+// Inputs for Strength Threshold
+strengthThreshold = input(defval=2, title="Strength Threshold", minval=1)
+
+// Target Settings
+targetOn = input(defval=false, title="Target: On/Off")
+targetValue = input(defval=1, title="Target", type=input.integer)
+
+// Stoploss Settings
+stoplossOn = input(defval=false, title="Stoploss: On/Off")
+stoplossValue = input(defval=1, title="Stoploss Value", type=input.integer)
+
+// Trailing Stop Loss Settings
+tslOn = input(defval=false, title="Trail SL: On/Off")
+tslValue = input(defval=1, title="TSL Value", type=input.integer)
+
+// Trade Mode
+tradeMode = input(defval="Both", title="Trade Mode", options=["Both", "Long", "Short"])
+
+// Properties Tab Inputs
+initialCapital = input(defval=300000, title="Initial Capital", type=input.integer)
+baseCurrency = input(defval="Default", title="Base Currency", options=["Default", "USD", "EUR", "GBP"])
+orderSize = input(defval=1, title="Order Size", type=input.integer)
+orderSizeType = input(defval="Contracts", title="Order Size Type", options=["Contracts", "Shares", "Lots"])
+pyramiding = input(defval=1, title="Pyramiding Orders", type=input.integer)
+
+// Commission and Slippage
+commission = input(defval=0.0, title="Commission (%)", type=input.float)
+slippage = input(defval=0, title="Slippage (ticks)", type=input.integer)
+
+// Margin for long/short positions
+marginLong = input(defval=0, title="Margin for Long Positions", type=input.integer)
+marginShort = input(defval=0, title="Margin for Short Positions", type=input.integer)
+
+// Recalculation Options
+recalculate = input(defval="On every tick", title="Recalculate", options=["After order is filled", "On every tick"])
+fillOrders = input(defval=true, title="Fill Orders", type=input.bool)
+
+// Source for Indicator Logic
+source = close
+
+// Smooth Average Range Calculation
+per1 = input(defval=27, minval=1, title="Fast period")
+mult1 = input(defval=1.6, minval=0.1, title="Fast range")
+per2 = input(defval=55, minval=1, title="Slow period")
+mult2 = input(defval=2, minval=0.1, title="Slow range")
+
+smoothrng(x, t, m) =>
+    wper = t * 2 - 1
+    avrng = ema(abs(x - x[1]), t)
+    smoothrng = ema(avrng, wper) * m
+    smoothrng
+
+smrng1 = smoothrng(source, per1, mult1)
+smrng2 = smoothrng(source, per2, mult2)
+smrng = (smrng1 + smrng2) / 2
+
+// Range Filter
+rngfilt(x, r) =>
+    rngfilt = x
+    rngfilt := x > nz(rngfilt[1]) ? x - r < nz(rngfilt[1]) ? nz(rngfilt[1]) : x - r : 
+       x + r > nz(rngfilt[1]) ? nz(rngfilt[1]) : x + r
+    rngfilt
+
+filt = rngfilt(source, smrng)
+
+// Uptrend and Downtrend Detection
+upward = 0.0
+upward := filt > filt[1] ? nz(upward[1]) + 1 : filt < filt[1] ? 0 : nz(upward[1])
+downward = 0.0
+downward := filt < filt[1] ? nz(downward[1]) + 1 : filt > filt[1] ? 0 : nz(downward[1])
+
+// Bands
+hband = filt + smrng
+lband = filt - smrng
+
+// Strong Trend Conditions
+longCond = (source > filt and source > source[1] and upward > 0) or (source > filt and source < source[1] and upward > 0)
+shortCond = (source < filt and source < source[1] and downward > 0) or (source < filt and source > source[1] and downward > 0)
+
+// Detecting transitions between long and short signals
+CondIni = 0
+CondIni := longCond ? 1 : shortCond ? -1 : CondIni[1]
+
+//consider entries when there is a transition between long and short trends
+strongLong = longCond and CondIni[1] == -1
+strongShort = shortCond and CondIni[1] == 1
+
+// System Mode Handling (Intraday Session Logic)
+inSession = (time >= intradayStart and time <= intradayEnd)
+tradeAllowed = sysMode == "Positional" or (sysMode == "Intraday" and inSession)
+
+// trade filtering with system mode consideration
+long = strongLong and tradeAllowed and (tradeMode == "Both" or tradeMode == "Long")
+short = strongShort and tradeAllowed and (tradeMode == "Both" or tradeMode == "Short")
+
+// Target, Stoploss, and Trailing Stoploss 
+var float entryPrice = na
+var float targetPrice = na
+var float stoplossPrice = na
+
+if (long)
+    entryPrice := close
+    targetPrice := targetOn ? entryPrice + targetValue : na
+    stoplossPrice := stoplossOn ? entryPrice - stoplossValue : na
+
+if (short)
+    entryPrice := close
+    targetPrice := targetOn ? entryPrice - targetValue : na
+    stoplossPrice := stoplossOn ? entryPrice + stoplossValue : na
+
+// Trailing Stop Loss
+var float tsl = na
+if (tslOn)
+    if (long)
+        tsl := na(tsl) ? entryPrice - tslValue : max(tsl, close - tslValue)
+    if (short)
+        tsl := na(tsl) ? entryPrice + tslValue : min(tsl, close + tslValue)
+
+// Exit conditions based on Target or Stop Loss or Trailing Stop Loss
+exitLong = (targetOn and close >= targetPrice) or (stoplossOn and close <= stoplossPrice) or (tslOn and close <= tsl)
+exitShort = (targetOn and close <= targetPrice) or (stoplossOn and close >= stoplossPrice) or (tslOn and close >= tsl)
+
+// Plotting Signals
+plotshape(series=long, title="Long", location=location.belowbar, color=color.lime, style=shape.labelup, text="S Long" , textcolor = color.white)
+plotshape(series=short, title="Short", location=location.abovebar, color=color.red, style=shape.labeldown, text="S Short" , textcolor = color.white)
+
+// Alerts for Entry and Exit
+alertcondition(long, title="Strong Long Entry", message="Go Long - Strong Signal")
+alertcondition(short, title="Strong Short Entry", message="Go Short - Strong Signal")
+alertcondition(exitLong, title="Exit Long", message="Exit Long Position")
+alertcondition(exitShort, title="Exit Short", message="Exit Short Position")
