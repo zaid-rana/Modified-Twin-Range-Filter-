@@ -1,68 +1,72 @@
-//@version=4
-study(title="Modified Twin Range Filter", shorttitle="MTwinRF v4.8", overlay=true)
+//@version=5
+indicator(title="Modified Twin Range Filter", shorttitle="MTwinRF v5.0", overlay=true)
 
-// Input for System Mode
-sysMode = input(defval="Positional", title="System Mode", options=["Positional", "Intraday"])
 
-// Inputs for Intraday Start and End Sessions
-intradayStart = input(defval=timestamp("2022-01-01 09:00"), title="Intraday Start Session", type=input.time)
-intradayEnd = input(defval=timestamp("2022-01-01 22:00"), title="Intraday End Session", type=input.time)
+// Intraday Session Logic
+sysMode = input.string(defval="Positional", title="System Mode", options=["Positional", "Intraday"])
+intradayStart = input.time(defval=timestamp("2022-01-01 09:00"), title="Intraday Start Session")
+intradayEnd = input.time(defval=timestamp("2022-01-01 22:00"), title="Intraday End Session")
 
 // Inputs for Breakout Period
-breakoutPeriod = input(defval=3, title="Breakout Period", minval=1)
-exitBreakout = input(defval=3, title="Exit Breakout", minval=1)
+breakoutPeriod = input.int(defval=3, title="Breakout Period", minval=1)
+exitBreakout = input.int(defval=3, title="Exit Breakout", minval=1)
 
 // Inputs for Strength Threshold
-strengthThreshold = input(defval=2, title="Strength Threshold", minval=1)
+strengthThreshold = input.int(defval=2, title="Strength Threshold", minval=1)
 
 // Target Settings
-targetOn = input(defval=false, title="Target: On/Off")
-targetValue = input(defval=1, title="Target", type=input.integer)
+targetOn = input.bool(defval=false, title="Target: On/Off")
+targetValue = input.int(defval=1, title="Target", minval=1)
 
 // Stoploss Settings
-stoplossOn = input(defval=false, title="Stoploss: On/Off")
-stoplossValue = input(defval=1, title="Stoploss Value", type=input.integer)
+stoplossOn = input.bool(defval=false, title="Stoploss: On/Off")
+stoplossValue = input.int(defval=1, title="Stoploss Value", minval=1)
 
 // Trailing Stop Loss Settings
-tslOn = input(defval=false, title="Trail SL: On/Off")
-tslValue = input(defval=1, title="TSL Value", type=input.integer)
-
-// Trade Mode
-tradeMode = input(defval="Both", title="Trade Mode", options=["Both", "Long", "Short"])
+tslOn = input.bool(defval=false, title="Trail SL: On/Off")
+tslValue = input.int(defval=1, title="TSL Value", minval=1)
 
 // Properties Tab Inputs
-initialCapital = input(defval=300000, title="Initial Capital", type=input.integer)
-baseCurrency = input(defval="Default", title="Base Currency", options=["Default", "USD", "EUR", "GBP"])
-orderSize = input(defval=1, title="Order Size", type=input.integer)
-orderSizeType = input(defval="Contracts", title="Order Size Type", options=["Contracts", "Shares", "Lots"])
-pyramiding = input(defval=1, title="Pyramiding Orders", type=input.integer)
+initialCapital = input.int(defval=300000, title="Initial Capital")
+baseCurrency = input.string(defval="Default", title="Base Currency", options=["Default", "USD", "EUR", "GBP"])
+orderSize = input.int(defval=1, title="Order Size")
+orderSizeType = input.string(defval="Contracts", title="Order Size Type", options=["Contracts", "Shares", "Lots"])
+pyramiding = input.int(defval=1, title="Pyramiding Orders")
 
 // Commission and Slippage
-commission = input(defval=0.0, title="Commission (%)", type=input.float)
-slippage = input(defval=0, title="Slippage (ticks)", type=input.integer)
+commission = input.float(defval=0.0, title="Commission (%)")
+slippage = input.int(defval=0, title="Slippage (ticks)")
 
 // Margin for long/short positions
-marginLong = input(defval=0, title="Margin for Long Positions", type=input.integer)
-marginShort = input(defval=0, title="Margin for Short Positions", type=input.integer)
+marginLong = input.int(defval=0, title="Margin for Long Positions")
+marginShort = input.int(defval=0, title="Margin for Short Positions")
 
 // Recalculation Options
-recalculate = input(defval="On every tick", title="Recalculate", options=["After order is filled", "On every tick"])
-fillOrders = input(defval=true, title="Fill Orders", type=input.bool)
+recalculate = input.string(defval="On every tick", title="Recalculate", options=["After order is filled", "On every tick"])
+fillOrders = input.bool(defval=true, title="Fill Orders")
 
 // Source for Indicator Logic
 source = close
 
 // Smooth Average Range Calculation
-per1 = input(defval=27, minval=1, title="Fast period")
-mult1 = input(defval=1.6, minval=0.1, title="Fast range")
-per2 = input(defval=55, minval=1, title="Slow period")
-mult2 = input(defval=2, minval=0.1, title="Slow range")
+per1 = input.int(defval=27, minval=1, title="Fast period")
+mult1 = input.float(defval=1.6, minval=0.1, title="Fast range")
+per2 = input.int(defval=55, minval=1, title="Slow period")
+mult2 = input.float(defval=2, minval=0.1, title="Slow range")
+
+// TWS Setup
+tradeMode = input.string(defval="Both", title="Trade Mode", options=["Both", "Long", "Short"])
+// strategyTag = input.string(defval="PRO1", title="Strategy Tag")
+// code = input.string(defval="E5CF7B66472", title="Code")
+// productType = input.string(defval="MIS", title="Product Type", options=["MIS", "NRML", "CNC"])
+// instrumentType = input.string(defval="OPTIDX", title="Instrument Type", options=["OPTIDX", "FUTIDX", "EQ"])
+// quantityType = input.string(defval="Fixed", title="Quantity Type", options=["Fixed", "Percentage"])
+// quantity = input.int(defval=1, title="Quantity")
 
 smoothrng(x, t, m) =>
     wper = t * 2 - 1
-    avrng = ema(abs(x - x[1]), t)
-    smoothrng = ema(avrng, wper) * m
-    smoothrng
+    avrng = ta.ema(math.abs(x - x[1]), t)
+    ta.ema(avrng, wper) * m
 
 smrng1 = smoothrng(source, per1, mult1)
 smrng2 = smoothrng(source, per2, mult2)
@@ -71,9 +75,8 @@ smrng = (smrng1 + smrng2) / 2
 // Range Filter
 rngfilt(x, r) =>
     rngfilt = x
-    rngfilt := x > nz(rngfilt[1]) ? x - r < nz(rngfilt[1]) ? nz(rngfilt[1]) : x - r : 
-       x + r > nz(rngfilt[1]) ? nz(rngfilt[1]) : x + r
-    rngfilt
+    rngfilt := x > nz(rngfilt[1]) ? (x - r < nz(rngfilt[1]) ? nz(rngfilt[1]) : x - r) : 
+       (x + r > nz(rngfilt[1]) ? nz(rngfilt[1]) : x + r)
 
 filt = rngfilt(source, smrng)
 
@@ -95,7 +98,7 @@ shortCond = (source < filt and source < source[1] and downward > 0) or (source <
 CondIni = 0
 CondIni := longCond ? 1 : shortCond ? -1 : CondIni[1]
 
-//consider entries when there is a transition between long and short trends
+// Consider entries when there is a transition between long and short trends
 strongLong = longCond and CondIni[1] == -1
 strongShort = shortCond and CondIni[1] == 1
 
@@ -103,7 +106,7 @@ strongShort = shortCond and CondIni[1] == 1
 inSession = (time >= intradayStart and time <= intradayEnd)
 tradeAllowed = sysMode == "Positional" or (sysMode == "Intraday" and inSession)
 
-// trade filtering with system mode consideration
+// Trade filtering with system mode consideration
 long = strongLong and tradeAllowed and (tradeMode == "Both" or tradeMode == "Long")
 short = strongShort and tradeAllowed and (tradeMode == "Both" or tradeMode == "Short")
 
@@ -126,9 +129,9 @@ if (short)
 var float tsl = na
 if (tslOn)
     if (long)
-        tsl := na(tsl) ? entryPrice - tslValue : max(tsl, close - tslValue)
+        tsl := na(tsl) ? entryPrice - tslValue : math.max(tsl, close - tslValue)
     if (short)
-        tsl := na(tsl) ? entryPrice + tslValue : min(tsl, close + tslValue)
+        tsl := na(tsl) ? entryPrice + tslValue : math.min(tsl, close + tslValue)
 
 // Exit conditions based on Target or Stop Loss or Trailing Stop Loss
 exitLong = (targetOn and close >= targetPrice) or (stoplossOn and close <= stoplossPrice) or (tslOn and close <= tsl)
